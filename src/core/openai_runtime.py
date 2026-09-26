@@ -62,14 +62,33 @@ class OpenAIRunner:
             return block_msg
 
         client = self._client()
-        completion = client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": agent.instruction},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=self.temperature,
-        )
+        messages = [
+            {"role": "system", "content": agent.instruction},
+            {"role": "user", "content": user_message},
+        ]
+        try:
+            completion = client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=self.temperature,
+            )
+        except Exception as exc:
+            # OpenRouter currently exposes this locked lab model through its
+            # free route. Keep the assignment's canonical model id while
+            # retrying only the equivalent ``:free`` endpoint on this exact
+            # provider-routing error.
+            use_free_route = (
+                self.provider == "openrouter"
+                and self.model == "liquid/lfm-2.5-2.6b"
+                and "No endpoints found" in str(exc)
+            )
+            if not use_free_route:
+                raise
+            completion = client.chat.completions.create(
+                model=f"{self.model}:free",
+                messages=messages,
+                temperature=self.temperature,
+            )
         text = (completion.choices[0].message.content or "").strip()
 
         for hook in self.output_hooks:
